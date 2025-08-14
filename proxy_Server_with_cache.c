@@ -15,8 +15,7 @@
 
 #define MAX_CLIENTS 10
 
-#define MAX_BYTES 1024
-// limited size cache
+#define MAX_BYTES 4096 // maximum bytes to read from the client
 
 typedef struct cache_element cache_element ;
 struct cache_element{
@@ -42,18 +41,81 @@ pthread_mutex_t lock ;  // iske paas sirf 2 values hai either 0 ya 1 agr koi cli
 cache_element* head;
 int cache_size ;
 
-
-
 void * handle_client(void *arg){
     sem_wait(&semaphore);
     int p;
-    sem_getvalue(&semaphore,p);
+    sem_getvalue(&semaphore,p);  // semaphore ki value ko get krne ke liye
     printf("Semaphore value: %d\n", p);
-    int * t = (int*)arg;
+    int * t = (int*)arg;   //
     int client_socketId = *t;
-    int byte_send_client ,len;
-    char * buffer = (char*)calloc(MAX_BYTES, sizeof(char));
+    int bytes_send_client ,len;
+    char * buffer = (char*)calloc(MAX_BYTES, sizeof(char));  // buffer to store the data received from the client
+    bzero(buffer, MAX_BYTES); // clearing the buffer
+    bytes_send_client =  recv(client_socketId, buffer, MAX_BYTES, 0); // receiving the data from the client
+    while(bytes_send_client > 0 ){
+        len = bytes_send_client;
+        if(strstr(buffer,"\r\n\r\n") == NULL){  // checking if the request is complete or not
+            bytes_send_client = recv(client_socketId, buffer + len, MAX_BYTES - len, 0);
+            len += bytes_send_client;
+    }else{
+            break;
+        }
+    }
+    char *tempReq = (char*)malloc(strlen(buffer) * sizeof(char)+1); // allocating memory for the url
+    for(int i = 0; i < strlen(buffer); i++){
+        tempReq[i] = buffer[i];
+    }
+    struct cache_element *temp = find(tempReq);     // checking if the url is present in the cache
+    if(temp!=NULL){
+        int size = temp->len/sizeof(char);
+        int pos = 0 ;
+        char response[MAX_BYTES];
+        while(pos < size){
+            bzero(response,MAX_BYTES);
+            for(int i = 0; i < MAX_BYTES ;i++){
+                response[i] = temp->data[i];
+                pos++;
+            }
+            send(client_socketId,response,MAX_BYTES,0);
+        }
+        printf("DATA RETRIEVED FROM THE CACHE\n");
+        printf("%s/n/n" , response);
+    }else if(bytes_send_client >0 ){
+        len = strlen(buffer);
+        ParsedRequest *request = ParsedRequest_create();
+
+        if(ParsedRequest_parse(request,buffer,len)){
+            printf("Parsing Failed\n");
+        }else{
+            bzero(buffer,MAX_BYTES);
+            if(!strcmp(request->method,"GET")){
+                if(request->host && request->path && checkHTTPversion(request->version)==1){
+                    bytes_send_client = handle_request(socket,request,tempReq);
+                    if(bytes_send_client == -1){
+                        sendErrorMessage(socket,500);
+                    }
+                }else{
+                    sendErrorMessage(socket,500);
+                }
+            }else{
+                printf("THIS CODE DOESNT SUPPORT ANY REQ APART FROM GET\n");
+            }
+        }
+        ParsedRequest_destroy(request);
+    }else if(bytes_send_client == 0){
+        printf("CLIENT IS DISCONNECTED ")
+    }
+    shutdown(socket,SHUT_RDWR);
+    close(client_socketId);
+    free(buffer);
+    sem_post(&semaphore);
+    sem_getvalue(&semaphore,p);
+    printf("Semaphore post value is %d\n" , p);
+    free(tempReq);
+    return NULL:
+
 }
+
 
 int main(int argc , char* argv[]){
     int client_socketId ,client_len;
